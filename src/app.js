@@ -224,25 +224,50 @@ function updateStorageUI() {
     if (!storageBanner) return;
 
     const type = state.storageType;
+    const fsSupported = fsStorage.isSupported();
+    const bannerDismissed = localStorage.getItem('vgl-studio-banner-dismissed') === '1';
 
     if (type === 'pending') {
+        // FSA supported, no folder chosen yet — full setup prompt
         if (storageBannerTitle) storageBannerTitle.textContent = 'Set up persistent storage';
         if (storageBannerDesc) storageBannerDesc.textContent = 'Choose a local folder to save your projects & images across sessions.';
-        if (storagePickBtn) storagePickBtn.textContent = 'Choose Folder';
+        if (storagePickBtn) { storagePickBtn.textContent = 'Choose Folder'; storagePickBtn.classList.remove('hidden'); }
+        if (storageSkipBtn) storageSkipBtn.classList.remove('hidden');
         storageBanner.classList.remove('hidden');
         storageIndicatorBtn?.classList.add('hidden');
+
     } else if (type === 'fs') {
         storageBanner.classList.add('hidden');
         if (storageIndicatorBtn && storageIndicatorName) {
             storageIndicatorName.textContent = fsStorage.getFolderName() || 'Local Folder';
             storageIndicatorBtn.classList.remove('hidden');
         }
+
     } else {
-        // localStorage mode — no banner, no indicator
-        storageBanner.classList.add('hidden');
+        // localStorage mode
+        if (!bannerDismissed) {
+            // First visit — inform the user about storage
+            if (!fsSupported) {
+                // Browser doesn't support FSA (Firefox, Safari, etc.)
+                if (storageBannerTitle) storageBannerTitle.textContent = 'Using browser storage';
+                if (storageBannerDesc) storageBannerDesc.textContent = 'Projects are saved in this browser. For folder-based storage, use Chrome or Edge.';
+                if (storagePickBtn) storagePickBtn.classList.add('hidden');
+                if (storageSkipBtn) storageSkipBtn.classList.add('hidden');
+            } else {
+                // FSA supported but user chose browser storage
+                if (storageBannerTitle) storageBannerTitle.textContent = 'Using browser storage';
+                if (storageBannerDesc) storageBannerDesc.textContent = 'Projects are saved in this browser only. You can switch to a local folder anytime.';
+                if (storagePickBtn) { storagePickBtn.textContent = 'Choose Folder instead'; storagePickBtn.classList.remove('hidden'); }
+                if (storageSkipBtn) storageSkipBtn.classList.add('hidden');
+            }
+            storageBanner.classList.remove('hidden');
+        } else {
+            storageBanner.classList.add('hidden');
+        }
         storageIndicatorBtn?.classList.add('hidden');
     }
 }
+
 
 // After the FS folder is chosen
 state.on('storageReady', () => {
@@ -264,11 +289,13 @@ storagePickBtn?.addEventListener('click', async () => {
 // "Use Browser Storage" button
 storageSkipBtn?.addEventListener('click', async () => {
     await state.skipToLocalStorage();
+    localStorage.setItem('vgl-studio-banner-dismissed', '1');
     updateStorageUI();
 });
 
-// Dismiss (X) — hides the banner this session only
+// Dismiss (X) — remembers choice in localStorage so banner stays gone
 storageBannerClose?.addEventListener('click', () => {
+    localStorage.setItem('vgl-studio-banner-dismissed', '1');
     storageBanner.classList.add('hidden');
 });
 
