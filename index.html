@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bria Arc</title>
+  <meta name="description" content="Bria Arc — AI Image Generation, Refinement & Editing Interface" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/style.css">
+</head>
+
+<body>
+  <div id="app">
+
+    <!-- ==================== STORAGE SETUP BANNER ==================== -->
+    <div id="storage-banner" class="storage-banner hidden">
+      <div class="storage-banner-inner">
+        <span class="storage-banner-icon">💾</span>
+        <div class="storage-banner-text">
+          <strong id="storage-banner-title">Set up persistent storage</strong>
+          <span id="storage-banner-desc">Choose a local folder to save your projects &amp; images across
+            sessions.</span>
+        </div>
+        <div class="storage-banner-actions">
+          <button id="storage-pick-btn" class="btn btn-primary btn-sm">Choose Folder</button>
+          <button id="storage-skip-btn" class="btn btn-sm">Use Browser Storage</button>
+        </div>
+        <button id="storage-banner-close" class="storage-banner-close" title="Dismiss">✕</button>
+      </div>
+    </div>
+
+    <!-- ==================== HEADER BAR ==================== -->
+    <header class="app-header">
+      <div class="header-left">
+        <h1 class="app-title">Bria<span class="title-accent">Arc</span></h1>
+      </div>
+      <div class="header-center">
+        <div class="project-selector">
+          <select id="project-select" title="Switch project">
+            <option value="">— No Project —</option>
+          </select>
+          <button id="new-project-btn" class="icon-btn" title="New Project">＋</button>
+          <button id="delete-project-btn" class="icon-btn danger" title="Delete Project">✕</button>
+        </div>
+      </div>
+      <div class="header-right">
+        <button id="storage-indicator-btn" class="storage-indicator-btn hidden" title="Change storage folder">
+          <span class="storage-indicator-icon">📁</span>
+          <span id="storage-indicator-name" class="storage-indicator-name"></span>
+        </button>
+        <button id="json-sidebar-header-toggle" class="icon-btn" title="Toggle VGL Inspector">VGL Inspector</button>
+      </div>
+    </header>
+
+    <!-- ==================== MAIN CONTENT ==================== -->
+    <main class="layout-horizontal">
+
+      <!-- Main Canvas Area -->
+      <section class="canvas-area" id="canvas-area">
+        <!-- Welcome Screen (shown when no project or empty) -->
+        <div id="welcome-screen" class="welcome-screen">
+          <div class="welcome-inner">
+            <div class="welcome-icon">✦</div>
+            <h2>Welcome to Bria Arc</h2>
+            <p>Create a new project or load an existing one to start generating images.</p>
+            <div class="welcome-actions">
+              <button id="welcome-new-btn" class="btn btn-primary">New Project</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Image Viewer (shown when image is featured) -->
+        <div id="image-viewer" class="image-viewer hidden">
+          <div class="viewer-wrapper" id="viewer-wrapper">
+            <img id="main-image" class="main-image" alt="Featured image" />
+            <!-- Reference Indicator -->
+            <div id="ref-indicator" class="ref-indicator hidden">Uploaded Reference</div>
+            <!-- Compare overlay (hidden by default) -->
+            <div id="compare-overlay" class="compare-overlay hidden">
+              <div id="compare-clipper" class="compare-clipper">
+                <img id="compare-image" class="compare-image" alt="Compare image" />
+              </div>
+              <div id="wipe-handle" class="wipe-handle">
+                <div class="wipe-line"></div>
+                <div class="wipe-knob"></div>
+              </div>
+              <button id="exit-compare-btn" class="exit-compare-btn hidden">Exit Compare</button>
+            </div>
+          </div>
+
+          <!-- Image info bar -->
+          <div id="image-info-bar" class="image-info-bar">
+            <div class="info-main">
+              <span id="info-seed" class="info-seed" title="Click to copy seed">Seed: —</span>
+              <span id="info-prompt" class="info-prompt" title="Click to copy prompt">No prompt</span>
+              <span id="zoom-indicator" class="zoom-indicator">100%</span>
+            </div>
+            <div class="info-actions">
+              <div class="gallery-nav" id="gallery-nav">
+                <button id="nav-jump-parent" class="nav-btn nav-btn-outer"
+                  title="Jump up one generation (parent image)">↑</button>
+                <button id="nav-prev" class="nav-btn nav-btn-inner" title="Previous image">‹</button>
+                <button id="nav-next" class="nav-btn nav-btn-inner" title="Next image">›</button>
+                <button id="nav-jump-child" class="nav-btn nav-btn-outer"
+                  title="Jump down one generation (child/variant)">↓</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Loading overlay -->
+          <div id="loading-overlay" class="loading-overlay hidden">
+            <div class="spinner"></div>
+            <p class="loading-text">Generating…</p>
+          </div>
+
+          <!-- Error overlay -->
+          <div id="error-overlay" class="error-overlay hidden">
+            <div class="error-inner">
+              <div class="error-icon">⚠</div>
+              <p id="error-message" class="error-message"></p>
+              <button id="retry-btn" class="btn btn-primary">Retry</button>
+            </div>
+          </div>
+      </section>
+
+      <div class="resizer" id="resizer-gallery"></div>
+
+      <!-- Thumbnail Reel (Right Sidebar) -->
+      <aside class="reel-sidebar" id="reel-sidebar" style="width: var(--reel-width)">
+        <div class="reel-header">
+          <h3>Gallery</h3>
+          <span id="image-count" class="badge">0</span>
+        </div>
+        <div class="reel-scroll" id="reel-scroll">
+          <!-- Batch groups will be injected here -->
+        </div>
+        <div class="reel-footer" id="reel-footer">
+          <div class="starred-info">
+            <span class="starred-label">⭐ Starred</span>
+            <span id="starred-count" class="badge">0</span>
+          </div>
+          <div class="reel-footer-actions">
+            <button id="export-starred-btn" class="btn btn-sm btn-starred-export"
+              title="Save starred images to a folder">
+              ⬇ Export
+            </button>
+            <button id="clear-starred-btn" class="btn btn-sm btn-starred-clear" title="Unstar all images">
+              ✕ Clear
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <div class="resizer" id="resizer-json"></div>
+
+      <!-- JSON Inspector Pane (Far Right) -->
+      <aside class="json-sidebar" id="json-sidebar" style="width: var(--json-sidebar-width)">
+        <div class="sidebar-header">
+          <h3>Visual Generative Language</h3>
+          <div class="sidebar-actions">
+            <select id="json-view-mode">
+              <option value="tree" selected>Tree</option>
+              <option value="raw">Raw</option>
+            </select>
+          </div>
+        </div>
+        <div class="sidebar-content">
+          <div id="json-inspector-view" class="json-inspector-view">
+            <pre id="json-inspector-pre">(no image selected)</pre>
+            <div id="json-inspector-tree" class="json-inspector-tree hidden"></div>
+          </div>
+        </div>
+        <!-- VGL Inspector Footer -->
+        <div class="vgl-inspector-footer" id="vgl-inspector-footer">
+          <button id="vgl-copy-all-btn" class="vgl-footer-btn vgl-copy-all" title="Copy full VGL JSON to clipboard">
+            ⎘ Copy All
+          </button>
+          <div class="vgl-copy-part-wrap" id="vgl-copy-part-wrap">
+            <button class="vgl-footer-btn vgl-copy-part-trigger" id="vgl-copy-part-btn" title="Copy a specific section">
+              Copy Part ▾
+            </button>
+            <div class="vgl-copy-part-menu" id="vgl-copy-part-menu"></div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- ==================== PROMPT BAR (Bottom) ==================== -->
+    <footer class="prompt-bar" id="prompt-bar">
+      <div class="prompt-bar-inner">
+        <!-- Left + Middle + Right Layout -->
+        <!-- Reorganized Layout: Primary (Top) and Advanced (Collapsible) -->
+        <div class="prompt-layout-container">
+
+          <!-- Primary Area: Prompt, Buttons, then Settings -->
+          <div class="prompt-primary-area">
+
+            <!-- 1. Prompt & Upload -->
+            <div class="prompt-input-group">
+              <label for="prompt-input" class="main-label">Prompt/Instructions</label>
+              <div class="prompt-row">
+                <div class="upload-control-inline">
+                  <label class="upload-label-inline" id="upload-label">
+                    <input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp"
+                      class="hidden-input" />
+                    <div class="upload-btn-inline" id="upload-btn-text" title="Upload reference image">📎</div>
+                  </label>
+                  <div id="upload-preview-wrap" class="upload-preview-wrap hidden">
+                    <img id="upload-preview" src="" />
+                    <button id="clear-upload-btn" class="clear-upload-btn" title="Remove image">✕</button>
+                  </div>
+                </div>
+                <div class="prompt-input-wrap">
+                  <textarea id="prompt-input" class="prompt-input" rows="3"
+                    placeholder="Describe thoughts, instructions, or modifications…"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. Action Buttons (Progress replaces this during gen) -->
+            <div class="prompt-action-container">
+              <div id="action-buttons-stack" class="action-buttons-stack">
+                <button id="btn-generate" class="btn btn-primary">Generate</button>
+                <button id="btn-refine" class="btn btn-secondary" disabled>Refine</button>
+                <button id="btn-edit" class="btn btn-secondary" disabled>Edit</button>
+              </div>
+              <!-- Integrated Progress/Cancel Button -->
+              <button id="btn-interrupt" class="btn btn-danger btn-progress hidden">
+                <span class="progress-text">Generating...</span>
+                <span class="interrupt-icon">✕</span>
+              </button>
+            </div>
+
+            <!-- 3. Quick Settings (Count, Ratio, Seed) -->
+            <div class="prompt-quick-settings">
+              <div class="quick-params-grid">
+                <div class="quick-param-top-row">
+                  <div class="param-item">
+                    <label>Count</label>
+                    <select id="image-count-select">
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4" selected>4</option>
+                    </select>
+                  </div>
+                  <div class="param-item">
+                    <label>Ratio</label>
+                    <select id="aspect-ratio-select">
+                      <option value="">Auto</option>
+                      <option value="1:1">1:1</option>
+                      <option value="2:3">2:3</option>
+                      <option value="3:2">3:2</option>
+                      <option value="4:5">4:5</option>
+                      <option value="5:4">5:4</option>
+                      <option value="9:16">9:16</option>
+                      <option value="16:9">16:9</option>
+                      <option value="9:21">9:21</option>
+                      <option value="21:9">21:9</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="quick-param-bottom-row">
+                  <div class="param-item full-width">
+                    <label>Seed</label>
+                    <input type="number" id="seed-input" placeholder="Rand" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Advanced Area: Collapsible Details -->
+          <details class="prompt-advanced-details">
+            <summary class="advanced-summary">Advanced Settings</summary>
+            <div class="advanced-grid">
+
+              <!-- Negative Prompt -->
+              <div class="neg-prompt-group">
+                <label for="negative-prompt-input">Negative Prompt</label>
+                <input type="text" id="negative-prompt-input" class="neg-prompt-input" placeholder="Exclude things…" />
+              </div>
+
+              <!-- Resolution -->
+              <div class="param-item res-param">
+                <label>Resolution</label>
+                <select id="resolution-select">
+                  <option value="1MP" selected>1MP</option>
+                  <option value="4MP">4MP</option>
+                </select>
+              </div>
+
+              <!-- Toggles Grid -->
+              <div class="toggles-grid">
+                <div class="toggle-item">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="lite-mode-toggle" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span class="toggle-label">Lite Mode</span>
+                </div>
+                <div class="toggle-item">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="mod-content-toggle" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span class="toggle-label">Content Mod</span>
+                </div>
+                <div class="toggle-item">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="mod-input-toggle" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span class="toggle-label">Input Mod</span>
+                </div>
+                <div class="toggle-item">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="mod-output-toggle" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span class="toggle-label">Output Mod</span>
+                </div>
+                <div class="toggle-item">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="ip-signal-toggle" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span class="toggle-label">IP Signal</span>
+                </div>
+                <div class="toggle-item">
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="preview-sp-checkbox" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span class="toggle-label">Preview SP</span>
+                </div>
+              </div>
+
+              <!-- API Key Management (Moved from header) -->
+              <div class="api-key-advanced">
+                <label for="api-key-input" class="api-key-label">Bria API Token</label>
+                <div class="api-key-row">
+                  <input type="password" id="api-key-input" class="api-key-input" placeholder="Enter Bria API token…"
+                    autocomplete="off" />
+                  <button id="api-key-toggle" class="icon-btn" title="Show/hide key">👁</button>
+                </div>
+              </div>
+
+            </div>
+          </details>
+        </div>
+      </div>
+
+
+      <!-- API Logs Panel -->
+      <div class="vgl-panel" id="logs-panel">
+        <div class="logs-header">
+          <button id="logs-toggle" class="vgl-toggle">
+            <span class="vgl-toggle-icon">▶</span> API Logs
+          </button>
+          <button id="logs-clear-btn" class="btn btn-sm hidden">Clear</button>
+        </div>
+        <div id="logs-content" class="vgl-content hidden">
+          <div id="logs-list" class="logs-list">
+            <!-- Logs injected here -->
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Context Menu -->
+    <div id="context-menu" class="context-menu hidden">
+      <button data-action="compare">🔀 Compare</button>
+      <button data-action="jump-to-parent" id="ctx-jump-parent" class="hidden">⬆ Jump to Parent</button>
+      <button data-action="jump-to-child" id="ctx-jump-child" class="hidden">⬇ Jump to Child</button>
+      <button data-action="star">⭐ Star / Unstar</button>
+      <hr />
+      <button data-action="enhance">✨ Creative Enhancer</button>
+      <div class="context-submenu-item">
+        <button class="context-submenu-trigger">📐 Increase Resolution ▶</button>
+        <div class="context-submenu">
+          <button data-action="increase-resolution" data-scale="2">2× Resolution</button>
+          <button data-action="increase-resolution" data-scale="4">4× Resolution</button>
+        </div>
+      </div>
+      <hr />
+      <button data-action="download-png">⬇ Download PNG</button>
+      <button data-action="download-sp">📄 Download VGL</button>
+      <button data-action="show-in-folder">📂 Show in Folder</button>
+      <hr />
+      <button data-action="copy-seed">📋 Copy Seed</button>
+      <button data-action="copy-prompt">📋 Copy Prompt</button>
+      <hr />
+      <button data-action="delete" class="danger-text">✕ Delete Image</button>
+    </div>
+
+    <!-- New Project Dialog -->
+    <dialog id="new-project-dialog" class="modal">
+      <form method="dialog">
+        <h3>New Project</h3>
+        <input type="text" id="new-project-name" placeholder="Project name" required />
+        <div class="modal-actions">
+          <button type="submit" value="create" class="btn btn-primary">Create</button>
+          <button type="submit" value="cancel" class="btn">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- SP Preview Dialog -->
+    <dialog id="sp-preview-dialog" class="modal modal-wide">
+      <div class="sp-preview-container">
+        <h3>Structured Prompt Preview</h3>
+        <textarea id="sp-preview-editor" class="sp-preview-editor"></textarea>
+        <div class="modal-actions">
+          <button id="sp-preview-generate" class="btn btn-primary">Generate</button>
+          <button id="sp-preview-cancel" class="btn">Cancel</button>
+        </div>
+      </div>
+    </dialog>
+    <!-- API Key Warning Dialog -->
+    <dialog id="api-key-warning-dialog" class="modal">
+      <div class="api-key-warning-inner">
+        <div class="api-key-warning-icon">🔑</div>
+        <h3>API Token Required</h3>
+        <p>A Bria API token is needed to generate images.<br>Enter it in <strong>Advanced Settings → Bria API
+            Token</strong>.</p>
+        <div class="modal-actions">
+          <button id="api-key-warning-go" class="btn btn-primary">Open Settings</button>
+          <button id="api-key-warning-close" class="btn">Dismiss</button>
+        </div>
+      </div>
+    </dialog>
+
+  </div>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+
+</html>
