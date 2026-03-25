@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/arcdemo/assets/index-DnPglLOF.js"></script>
-  <link rel="stylesheet" crossorigin href="/arcdemo/assets/index-CBjT4xw_.css">
+  <script type="module" crossorigin src="/arcdemo/assets/index-BQqNePKz.js"></script>
+  <link rel="stylesheet" crossorigin href="/arcdemo/assets/index-dhcqAWMA.css">
 </head>
 
 <body>
@@ -44,10 +44,10 @@
             <option value="">— No Project —</option>
           </select>
           <button id="new-project-btn" class="icon-btn" title="New Project">＋</button>
-          <button id="delete-project-btn" class="icon-btn danger" title="Delete Project">✕</button>
         </div>
       </div>
       <div class="header-right">
+        <button id="delete-project-btn" class="icon-btn danger" title="Delete Project">✕</button>
         <button id="storage-indicator-btn" class="storage-indicator-btn hidden" title="Change storage folder">
           <span class="storage-indicator-icon">📁</span>
           <span id="storage-indicator-name" class="storage-indicator-name"></span>
@@ -97,7 +97,11 @@
             <div class="info-main">
               <span id="info-seed" class="info-seed" title="Click to copy seed">Seed: —</span>
               <span id="info-prompt" class="info-prompt" title="Click to copy prompt">No prompt</span>
-              <span id="zoom-indicator" class="zoom-indicator">100%</span>
+              <div class="zoom-controls">
+                <span id="zoom-indicator" class="zoom-indicator">Fit</span>
+                <button id="zoom-fit-btn" class="zoom-btn zoom-btn-active" title="Fit image to window (F)">Fit</button>
+                <button id="zoom-100-btn" class="zoom-btn" title="View at 100% size (1)">100%</button>
+              </div>
             </div>
             <div class="info-actions">
               <div class="gallery-nav" id="gallery-nav">
@@ -181,7 +185,7 @@
           </button>
           <div class="vgl-copy-part-wrap" id="vgl-copy-part-wrap">
             <button class="vgl-footer-btn vgl-copy-part-trigger" id="vgl-copy-part-btn" title="Copy a specific section">
-              Copy Part ▾
+              Copy Object ▾
             </button>
             <div class="vgl-copy-part-menu" id="vgl-copy-part-menu"></div>
           </div>
@@ -217,6 +221,7 @@
                 <div class="prompt-input-wrap">
                   <textarea id="prompt-input" class="prompt-input" rows="3"
                     placeholder="Describe thoughts, instructions, or modifications…"></textarea>
+                  <button id="prompt-expand-btn" class="prompt-expand-btn" title="Expand editor (Shift+Enter)">⤢</button>
                 </div>
               </div>
             </div>
@@ -229,7 +234,7 @@
                 <button id="btn-edit" class="btn btn-secondary" disabled>Edit</button>
               </div>
               <!-- Integrated Progress/Cancel Button -->
-              <button id="btn-interrupt" class="btn btn-danger btn-progress hidden">
+              <button id="btn-interrupt" class="btn btn-primary btn-progress hidden">
                 <span class="progress-text">Generating...</span>
                 <span class="interrupt-icon">✕</span>
               </button>
@@ -263,11 +268,15 @@
                       <option value="21:9">21:9</option>
                     </select>
                   </div>
+                  <div class="param-item param-item-lite">
+                    <label>Mode</label>
+                    <button id="lite-quick-btn" class="lite-quick-btn" type="button" title="Use the faster Lite model for generation &amp; layout">⚡ Lite</button>
+                  </div>
                 </div>
                 <div class="quick-param-bottom-row">
                   <div class="param-item full-width">
                     <label>Seed</label>
-                    <input type="number" id="seed-input" placeholder="Rand" />
+                    <input type="number" id="seed-input" placeholder="Rand" title="Leave empty for a random seed each time" />
                   </div>
                 </div>
               </div>
@@ -297,7 +306,7 @@
 
               <!-- Toggles Grid -->
               <div class="toggles-grid">
-                <div class="toggle-item">
+                <div class="toggle-item" style="display:none">
                   <label class="toggle-switch">
                     <input type="checkbox" id="lite-mode-toggle" />
                     <span class="toggle-slider"></span>
@@ -398,6 +407,48 @@
       <hr />
       <button data-action="delete" class="danger-text">✕ Delete Image</button>
     </div>
+
+    <!-- Canvas Context Menu (right-click on main image viewer) -->
+    <div id="canvas-context-menu" class="context-menu hidden">
+      <button data-canvas-action="enhance">✨ Creative Enhancer</button>
+      <div class="context-submenu-item">
+        <button class="context-submenu-trigger">📐 Increase Resolution ▶</button>
+        <div class="context-submenu">
+          <button data-canvas-action="increase-resolution" data-scale="2">2× Resolution</button>
+          <button data-canvas-action="increase-resolution" data-scale="4">4× Resolution</button>
+        </div>
+      </div>
+      <button data-canvas-action="remove-background">🪄 Remove Background</button>
+      <div class="context-submenu-item" id="canvas-ctx-erase-item">
+        <button class="context-submenu-trigger">🧹 Erase Object ▶</button>
+        <div class="context-submenu" id="canvas-ctx-erase-submenu">
+          <!-- Populated dynamically from VGL objects -->
+        </div>
+      </div>
+      <div class="context-submenu-item" id="canvas-ctx-copy-item">
+        <button class="context-submenu-trigger">📋 Copy Object ▶</button>
+        <div class="context-submenu" id="canvas-ctx-copy-submenu">
+          <!-- Populated dynamically from VGL objects -->
+        </div>
+      </div>
+      <button data-canvas-action="copy-background" id="canvas-ctx-copy-bg">🌅 Copy Background</button>
+    </div>
+
+    <!-- Prompt Expand Dialog -->
+    <dialog id="prompt-expand-dialog" class="modal modal-prompt-expand">
+      <div class="prompt-expand-inner">
+        <div class="prompt-expand-header">
+          <span class="prompt-expand-title">Prompt / Instructions</span>
+          <span class="prompt-expand-hint">Ctrl+Enter to confirm</span>
+        </div>
+        <textarea id="prompt-expand-editor" class="prompt-expand-editor"
+          placeholder="Describe thoughts, instructions, or modifications…"></textarea>
+        <div class="modal-actions">
+          <button id="prompt-expand-done" class="btn btn-primary">Done</button>
+          <button id="prompt-expand-cancel" class="btn">Cancel</button>
+        </div>
+      </div>
+    </dialog>
 
     <!-- New Project Dialog -->
     <dialog id="new-project-dialog" class="modal">
