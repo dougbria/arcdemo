@@ -324,7 +324,8 @@ const api = {
         console.log('[TRACE] api.generate called', { promptSnippet: prompt?.substring(0, 20), seed, optionsKeys: Object.keys(options) });
         const endpoint = options.lite ? '/image/generate/lite' : '/image/generate';
 
-        const body = { seed };
+        const body = {};
+        if (seed !== null && typeof seed !== 'undefined' && seed > 0) body.seed = seed;
         if (options.structured_prompt) {
             let sp = options.structured_prompt;
             // Bria /image/generate expects structured_prompt as a JSON *string*, not an object
@@ -375,10 +376,8 @@ const api = {
         const endpoint = '/image/edit';
         const raw = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-        const body = {
-            images: [raw],
-            seed: seed
-        };
+        const body = { images: [raw] };
+        if (seed !== null && typeof seed !== 'undefined' && seed > 0) body.seed = seed;
 
         // Standard options
         body.prompt_content_moderation = !!options.mod_content;
@@ -416,7 +415,7 @@ const api = {
         const raw = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
         const body = { image: raw };
-        if (seed !== null) body.seed = seed;
+        if (seed !== null && seed > 0) body.seed = seed;
         body.prompt_content_moderation = !!options.mod_content;
         body.ip_signal = !!options.ip_signal;
         body.visual_input_content_moderation = !!options.mod_input;
@@ -524,9 +523,9 @@ const api = {
     async generateStructuredPromptFromDiff(originalPrompt, editedPrompt, seed, options = {}) {
         const body = {
             structured_prompt: originalPrompt,
-            user_adjusted_structured_prompt: editedPrompt,
-            seed
+            user_adjusted_structured_prompt: editedPrompt
         };
+        if (seed !== null && typeof seed !== 'undefined' && seed > 0) body.seed = seed;
 
         body.prompt_content_moderation = !!options.mod_content;
         body.ip_signal = !!options.ip_signal;

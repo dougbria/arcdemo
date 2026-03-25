@@ -23,7 +23,7 @@ export async function enhanceImage(imageId, options = {}) {
         });
 
         const thumbnail = await createThumbnail(result.base64, 200);
-        await state.addImage({ ...result, thumbnail }, img.prompt, 'enhance', generateUUID(), img.id);
+        await state.addImage({ ...result, thumbnail }, 'Creative Enhancer', 'Enhance', generateUUID(), img.id);
         showToast('Creative Enhancer complete!');
     } catch (err) {
         console.error('Enhance error:', err);
@@ -48,8 +48,8 @@ export async function increaseResolution(imageId, scaleFactor = 2) {
         const thumbnail = await createThumbnail(result.base64, 200);
         await state.addImage(
             { ...result, thumbnail, structured_prompt: img.structured_prompt },
-            img.prompt,
-            'enhance',
+            `Resolution ${scaleFactor}x`,
+            'Enhance',
             generateUUID(),
             img.id
         );
@@ -75,7 +75,7 @@ export async function removeBackground(imageId, options = {}) {
         const thumbnail = await createThumbnail(result.base64, 200);
         await state.addImage(
             { ...result, thumbnail, structured_prompt: null },
-            img.prompt,
+            'Removed Background',
             'edit',
             generateUUID(),
             img.id
@@ -105,7 +105,7 @@ export async function eraseObject(imageId, objectDescription, options = {}) {
         const thumbnail = await createThumbnail(result.base64, 200);
         await state.addImage(
             { ...result, thumbnail, structured_prompt: null },
-            img.prompt,
+            `Erase object: ${objectDescription}`,
             'edit',
             generateUUID(),
             img.id
