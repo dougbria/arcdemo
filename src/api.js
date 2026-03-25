@@ -34,6 +34,14 @@ async function _internalBriaRequest(endpoint, body, method = 'POST', requestOpti
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT);
 
+    let abortHandler = null;
+    if (requestOptions.signal) {
+        abortHandler = () => controller.abort();
+        requestOptions.signal.addEventListener('abort', abortHandler);
+        // if already aborted, abort internal controller
+        if (requestOptions.signal.aborted) controller.abort();
+    }
+
     console.log(`[API] Starting ${method} request to ${url}`, body);
 
     try {
@@ -66,6 +74,9 @@ async function _internalBriaRequest(endpoint, body, method = 'POST', requestOpti
 
         const response = await fetch(url, options);
         clearTimeout(timeoutId);
+        if (requestOptions.signal && abortHandler) {
+            requestOptions.signal.removeEventListener('abort', abortHandler);
+        }
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => null);
@@ -116,12 +127,15 @@ async function _internalBriaRequest(endpoint, body, method = 'POST', requestOpti
         if ((data.status_url || data.request_id) && data.status !== 'COMPLETED') {
             const requestId = data.request_id || data.status_url.split('/').pop();
             console.log(`[TRACE] _internalBriaRequest - starting poll for ${requestId}`);
-            return await pollStatus(requestId);
+            return await pollStatus(requestId, requestOptions);
         }
 
         return data;
     } catch (err) {
         clearTimeout(timeoutId);
+        if (requestOptions.signal && abortHandler) {
+            requestOptions.signal.removeEventListener('abort', abortHandler);
+        }
 
         // Detailed error logging for catch block
         state.addLog({
@@ -136,6 +150,9 @@ async function _internalBriaRequest(endpoint, body, method = 'POST', requestOpti
         });
 
         if (err.name === 'AbortError') {
+            if (requestOptions.signal?.aborted) {
+                throw new Error('Request cancelled by user.');
+            }
             throw new Error('Request timed out. Please try again.');
         }
         throw err;
@@ -177,7 +194,7 @@ async function briaRequest(endpoint, body, method = 'POST', requestOptions = {})
 /**
  * Poll the status endpoint until completion.
  */
-async function pollStatus(requestId) {
+async function pollStatus(requestId, requestOptions = {}) {
     const POLL_INTERVAL = 5000;
     const MAX_POLLS = 120; // 10 min at 5s intervals
 
@@ -185,7 +202,11 @@ async function pollStatus(requestId) {
     await new Promise(r => setTimeout(r, 2000));
 
     for (let i = 0; i < MAX_POLLS; i++) {
+        if (requestOptions.signal?.aborted) throw new Error('Request cancelled by user.');
+
         if (i > 0) await new Promise(r => setTimeout(r, POLL_INTERVAL));
+
+        if (requestOptions.signal?.aborted) throw new Error('Request cancelled by user.');
 
         const apiKey = state.getApiKey();
         try {
@@ -301,7 +322,7 @@ const api = {
      */
     async generate(prompt, seed, inputImageBase64 = null, options = {}) {
         console.log('[TRACE] api.generate called', { promptSnippet: prompt?.substring(0, 20), seed, optionsKeys: Object.keys(options) });
-        const endpoint = options.lite ? '/image/generate_lite' : '/image/generate';
+        const endpoint = options.lite ? '/image/generate/lite' : '/image/generate';
 
         const body = { seed };
         if (options.structured_prompt) {
@@ -330,7 +351,7 @@ const api = {
             body.images = [raw];
         }
 
-        const data = await briaRequest(endpoint, body);
+        const data = await briaRequest(endpoint, body, 'POST', { signal: options.signal });
         const imageUrl = data.result?.image_url;
         if (!imageUrl) throw new Error('No image returned from API.');
 
@@ -376,7 +397,7 @@ const api = {
             body.instruction = prompt;
         }
 
-        const data = await briaRequest(endpoint, body);
+        const data = await briaRequest(endpoint, body, 'POST', { signal: options.signal });
         const imageUrl = data.result?.image_url;
         if (!imageUrl) throw new Error('No image returned from API.');
 
@@ -401,7 +422,7 @@ const api = {
         body.visual_input_content_moderation = !!options.mod_input;
         body.visual_output_content_moderation = !!options.mod_output;
 
-        const data = await briaRequest(endpoint, body, 'POST', { noSync: true });
+        const data = await briaRequest(endpoint, body, 'POST', { noSync: true, signal: options.signal });
         const imageUrl = data.result?.image_url;
         if (!imageUrl) throw new Error('No image returned from API.');
 
@@ -421,7 +442,7 @@ const api = {
      * @param {string} imageBase64 - Base64 encoded image (or URL)
      * @param {number} scaleFactor - 2 or 4
      */
-    async increaseResolution(imageBase64, scaleFactor = 2) {
+    async increaseResolution(imageBase64, scaleFactor = 2, options = {}) {
         const raw = imageBase64.replace(/^data:image\/\w+;base64,/, '');
         const body = {
             image: raw,
@@ -429,7 +450,7 @@ const api = {
         };
 
         // Uses async polling (202) — same as other Bria endpoints
-        const data = await briaRequest('/image/edit/increase_resolution', body, 'POST');
+        const data = await briaRequest('/image/edit/increase_resolution', body, 'POST', { signal: options.signal });
         const imageUrl = data.result?.image_url;
         if (!imageUrl) throw new Error('No image URL returned from Increase Resolution API.');
 
@@ -445,7 +466,7 @@ const api = {
      * Generate a structured prompt or instruction only (no image).
      */
     async generateStructuredPrompt(promptOrInstruction, inputImageBase64 = null, existingStructuredPrompt = null, options = {}) {
-        let endpoint = '/structured_prompt/generate';
+        let endpoint = options.lite ? '/structured_prompt/generate/lite' : '/structured_prompt/generate';
         const body = {};
 
         if (existingStructuredPrompt && promptOrInstruction) {
@@ -453,7 +474,7 @@ const api = {
             body.structured_prompt = existingStructuredPrompt;
             body.prompt = promptOrInstruction;
         } else if (inputImageBase64) {
-            // Image-to-Image / Edit workflow
+            // Image-to-Image / Edit workflow — no lite variant for instructions
             endpoint = '/structured_instruction/generate';
             const raw = inputImageBase64.replace(/^data:image\/\w+;base64,/, '');
             body.images = [raw];
@@ -470,7 +491,7 @@ const api = {
 
         // NOTE: Do NOT use forceSync for structured_prompt endpoints — it triggers an UNKNOWN/500 on Bria's side.
         // Use async polling instead.
-        const data = await briaRequest(endpoint, body, 'POST');
+        const data = await briaRequest(endpoint, body, 'POST', { signal: options.signal });
 
         // The result shape from /structured_prompt/generate (after polling COMPLETED):
         // data.result.structured_prompt or data.result.structured_instruction
@@ -497,6 +518,9 @@ const api = {
      * @param {number} seed
      * @returns {Promise<{structured_prompt: string, seed: number}>}
      */
+    /**
+     * Generate optimized structured prompt from a diff (user edited the JSON).
+     */
     async generateStructuredPromptFromDiff(originalPrompt, editedPrompt, seed, options = {}) {
         const body = {
             structured_prompt: originalPrompt,
@@ -509,8 +533,7 @@ const api = {
         body.visual_input_content_moderation = !!options.mod_input;
         body.visual_output_content_moderation = !!options.mod_output;
 
-        // NOTE: Do NOT use forceSync for diff endpoints either — same UNKNOWN/500 behavior.
-        const data = await briaRequest('/structured_prompt/generate_from_diff', body, 'POST');
+        const data = await briaRequest('/structured_prompt/generate_from_diff', body, 'POST', { signal: options.signal });
 
         const sp = data.result?.structured_prompt
             || data.result?.structured_instruction
@@ -522,6 +545,41 @@ const api = {
             structured_prompt: sp,
             seed: data.result?.seed || data.seed || seed
         };
+    },
+
+    /**
+     * Remove background from an image.
+     * POST /v2/image/edit/remove_background
+     */
+    async removeBackground(imageBase64, options = {}) {
+        const raw = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+        const body = { image: raw };
+
+        const data = await briaRequest('/image/edit/remove_background', body, 'POST', { signal: options.signal });
+        const imageUrl = data.result?.image_url || data.result?.url;
+        if (!imageUrl) throw new Error('No image URL returned from Remove Background API.');
+
+        const base64 = await fetchImageAsBase64(imageUrl);
+        return { base64, seed: data.result?.seed || null, imageUrl };
+    },
+
+    /**
+     * Erase an object from an image by text description.
+     * POST /v2/image/edit/erase_by_text
+     */
+    async eraseByText(imageBase64, objectDescription, options = {}) {
+        const raw = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+        const body = {
+            image: raw,
+            object_name: objectDescription
+        };
+
+        const data = await briaRequest('/image/edit/erase_by_text', body, 'POST', { signal: options.signal });
+        const imageUrl = data.result?.image_url || data.result?.url;
+        if (!imageUrl) throw new Error('No image URL returned from Erase By Text API.');
+
+        const base64 = await fetchImageAsBase64(imageUrl);
+        return { base64, seed: data.result?.seed || null, imageUrl };
     }
 };
 

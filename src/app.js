@@ -113,6 +113,15 @@ const resolutionSelect = getEl('resolution-select');
 const seedInput = getEl('seed-input');
 
 const liteModeToggle = getEl('lite-mode-toggle');
+const liteQuickBtn   = document.getElementById('lite-quick-btn');
+
+// Sync button ↔ hidden checkbox so any existing code reading liteModeToggle still works
+if (liteQuickBtn) {
+    liteQuickBtn.addEventListener('click', () => {
+        const isNowActive = liteQuickBtn.classList.toggle('active');
+        liteModeToggle.checked = isNowActive;
+    });
+}
 const modContentToggle = getEl('mod-content-toggle');
 const modInputToggle = getEl('mod-input-toggle');
 const modOutputToggle = getEl('mod-output-toggle');
@@ -528,11 +537,71 @@ apiKeyToggle.addEventListener('click', () => {
     apiKeyToggle.textContent = isPassword ? '🙈' : '👁';
 });
 
+
+// ============================================================
+// PROMPT AUTO-EXPAND + EXPAND MODAL
+// ============================================================
+
+const promptExpandBtn    = document.getElementById('prompt-expand-btn');
+const promptExpandDialog = document.getElementById('prompt-expand-dialog');
+const promptExpandEditor = document.getElementById('prompt-expand-editor');
+const promptExpandDone   = document.getElementById('prompt-expand-done');
+const promptExpandCancel = document.getElementById('prompt-expand-cancel');
+
+/** Resize promptInput to fit its content, capped at max-height from CSS. */
+function autoExpandPrompt() {
+    promptInput.style.height = 'auto';
+    promptInput.style.height = promptInput.scrollHeight + 'px';
+}
+
+promptInput.addEventListener('input', autoExpandPrompt);
+// Initial size-to-content in case a value is pre-filled
+autoExpandPrompt();
+
+/** Open the full-screen prompt editor. */
+function openPromptExpand() {
+    promptExpandEditor.value = promptInput.value;
+    promptExpandDialog.showModal();
+    // Focus and move cursor to end
+    promptExpandEditor.focus();
+    promptExpandEditor.setSelectionRange(promptExpandEditor.value.length, promptExpandEditor.value.length);
+}
+
+/** Write the modal value back to the main textarea and close. */
+function commitPromptExpand() {
+    promptInput.value = promptExpandEditor.value;
+    autoExpandPrompt();
+    promptInput.dispatchEvent(new Event('input'));   // triggers updateActionButtonsState
+    promptExpandDialog.close();
+}
+
+promptExpandBtn?.addEventListener('click', openPromptExpand);
+
+// Shift+Enter on the main textarea opens the modal
+promptInput.addEventListener('keydown', (e) => {
+    if (e.shiftKey && e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        openPromptExpand();
+    }
+});
+
+// Ctrl+Enter inside the modal commits
+promptExpandEditor?.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        commitPromptExpand();
+    }
+});
+
+promptExpandDone?.addEventListener('click', commitPromptExpand);
+promptExpandCancel?.addEventListener('click', () => promptExpandDialog.close());
+
 // ============================================================
 // ACTION BUTTONS STATE
 // ============================================================
 
 promptInput.addEventListener('input', updateActionButtonsState);
+
 
 function updateActionButtonsState() {
     const hasProject = !!state.getActiveProject();
@@ -571,12 +640,8 @@ function updateActionButtonsState() {
 state.on('featuredChanged', () => {
     updateActionButtonsState();
     updateJsonInspector();
-
-    // Auto-populate seed if empty
-    const featured = state.getFeaturedImage();
-    if (featured && !seedInput.value.trim()) {
-        seedInput.value = featured.seed;
-    }
+    // Do NOT auto-populate the seed field — leave it showing the 'Rand' placeholder
+    // unless the user has manually typed a value.
 });
 
 // ============================================================
@@ -638,11 +703,13 @@ if (promptInput) {
  * Gather common generation options from the UI.
  */
 function getGenerationOptions() {
+    // Prefer the visible quick button; fall back to the (hidden) Advanced checkbox
+    const isLite = liteQuickBtn ? liteQuickBtn.classList.contains('active') : !!liteModeToggle.checked;
     return {
         aspect_ratio: aspectRatioSelect.value || undefined,
         resolution: resolutionSelect.value === '4MP' ? '4MP' : undefined,
         negative_prompt: negativePromptInput.value.trim() || undefined,
-        lite: !!liteModeToggle.checked,
+        lite: isLite,
         mod_content: !!modContentToggle.checked,
         mod_input: !!modInputToggle.checked,
         mod_output: !!modOutputToggle.checked,
@@ -725,7 +792,10 @@ async function handleAction(mode) {
             } else {
                 console.log('[TRACE] handleAction - mode is generate, calling generateStructuredPrompt');
                 state.setLoading(true, 'Generating layout…');
-                const spResult = await api.generateStructuredPrompt(prompt, uploadedImageBase64, null, options);
+                const spResult = await api.generateStructuredPrompt(prompt, uploadedImageBase64, null, {
+                    ...options,
+                    signal: currentAbortController.signal
+                });
                 console.log('[TRACE] handleAction - generateStructuredPrompt returned', { sp: !!spResult.structured_prompt });
                 batchStructuredPrompt = spResult.structured_prompt;
                 if (!batchStructuredPrompt) throw new Error('Failed to generate structured prompt.');
@@ -743,14 +813,21 @@ async function handleAction(mode) {
         } else if (mode === 'edit') {
             console.log('[TRACE] handleAction - mode is edit, calling generateStructuredPrompt (instruction)');
             state.setLoading(true, 'Generating instruction layout…');
-            const spResult = await api.generateStructuredPrompt(prompt, editImage, null, options);
+            const spResult = await api.generateStructuredPrompt(prompt, editImage, null, {
+                ...options,
+                signal: currentAbortController.signal
+            });
             console.log('[TRACE] handleAction - generateStructuredPrompt (edit) returned', { sp: !!spResult.structured_prompt });
             batchStructuredPrompt = spResult.structured_prompt;
             if (!batchStructuredPrompt) throw new Error('Failed to generate structured instruction.');
         }
 
-        // Default Refine/Edit seed to featured seed if available
-        const baseSeed = seed !== null ? seed : ((mode === 'refine' || mode === 'edit') && featured ? featured.seed : Math.floor(Math.random() * 2147483647));
+        // For edit: always generate a fresh random seed unless the user typed one.
+        // For refine: fall back to featured seed so variants are close to the source.
+        const baseSeed = seed !== null ? seed : (
+            mode === 'edit' ? Math.floor(Math.random() * 2147483647)
+                            : (mode === 'refine' && featured ? featured.seed : Math.floor(Math.random() * 2147483647))
+        );
         console.log('[TRACE] handleAction - entering loop', { imageCount, baseSeed });
         const batchResults = [];
         for (let i = 0; i < imageCount; i++) {
@@ -772,13 +849,15 @@ async function handleAction(mode) {
                     case 'refine':
                         result = await api.generate(prompt, currentSeed, null, {
                             ...options,
-                            structured_prompt: batchStructuredPrompt
+                            structured_prompt: batchStructuredPrompt,
+                            signal: currentAbortController.signal
                         });
                         break;
                     case 'edit':
                         result = await api.edit(prompt, editImage, currentSeed, {
                             ...options,
-                            structured_instruction: batchStructuredPrompt
+                            structured_instruction: batchStructuredPrompt,
+                            signal: currentAbortController.signal
                         });
                         break;
                 }
@@ -836,7 +915,11 @@ async function handleStructuredPromptPreview(prompt, imageCount, options, mode =
         let spResult;
         let batchId = generateUUID();
         let parentImageId = (mode === 'refine' || mode === 'edit' ? featured?.id : null);
-        const baseSeed = options.seed !== undefined ? options.seed : (featured ? featured.seed : Math.floor(Math.random() * 2147483647));
+        // For edit: fresh random seed; for refine: use featured seed; for generate: random.
+        const baseSeed = options.seed !== undefined ? options.seed : (
+            mode === 'edit' ? Math.floor(Math.random() * 2147483647)
+                            : (mode === 'refine' && featured ? featured.seed : Math.floor(Math.random() * 2147483647))
+        );
 
         if (mode === 'refine') {
             if (!featured) throw new Error('No image selected to refine.');
@@ -902,8 +985,12 @@ async function handleStructuredPromptPreview(prompt, imageCount, options, mode =
             let editedSp = spPreviewEditor.value.trim();
             const seedFromInput = seedInput.value.trim() ? parseInt(seedInput.value.trim(), 10) : null;
 
-            // Refine/Edit seed defaults to featured image seed
-            const startSeed = seedFromInput !== null ? seedFromInput : ((mode === 'refine' || mode === 'edit') && featured ? featured.seed : (spResult.seed || Math.floor(Math.random() * 2147483647)));
+            // Edit: always use a fresh random seed unless user typed one.
+            // Refine: fall back to featured seed.
+            const startSeed = seedFromInput !== null ? seedFromInput : (
+                mode === 'edit' ? Math.floor(Math.random() * 2147483647)
+                                : (mode === 'refine' && featured ? featured.seed : (spResult.seed || Math.floor(Math.random() * 2147483647)))
+            );
 
             const editImage = uploadedImageBase64 || (mode === 'edit' ? featured?.base64 : null);
             const parentId = parentImageId; // Use the one we prepared earlier (includes uploaded reference)
@@ -1085,11 +1172,133 @@ if (spToggle && spContent && spToggleIcon) {
     });
 }
 
+/**
+ * Build a pruned copy of `data` that contains only the subtrees
+ * that include at least one path from `diffPaths`.
+ *
+ * e.g. diffPaths = ["Aesthetics.color_scheme", "Objects.0.description"]
+ * → returns { Aesthetics: { color_scheme: ... }, Objects: [ { description: ... } ] }
+ */
+function buildDiffOnlyTree(data, diffPaths) {
+    if (!data || typeof data !== 'object') return data;
+
+    // Group paths by their first segment
+    const byRoot = {};
+    for (const p of diffPaths) {
+        const dot = p.indexOf('.');
+        const head = dot === -1 ? p : p.slice(0, dot);
+        const tail = dot === -1 ? null : p.slice(dot + 1);
+        if (!byRoot[head]) byRoot[head] = [];
+        if (tail) byRoot[head].push(tail);
+    }
+
+    if (Array.isArray(data)) {
+        const result = [];
+        for (const [rawKey, childPaths] of Object.entries(byRoot)) {
+            const idx = parseInt(rawKey, 10);
+            if (isNaN(idx) || idx >= data.length) continue;
+            const child = data[idx];
+            result[idx] = childPaths.length > 0
+                ? buildDiffOnlyTree(child, childPaths)
+                : child;
+        }
+        // Compact sparse array
+        return result.filter((_, i) => i in result);
+    } else {
+        const result = {};
+        for (const [key, childPaths] of Object.entries(byRoot)) {
+            if (!(key in data)) continue;
+            result[key] = childPaths.length > 0
+                ? buildDiffOnlyTree(data[key], childPaths)
+                : data[key];
+        }
+        return result;
+    }
+}
+
 function updateJsonInspector() {
     const img = state.getFeaturedImage();
+
+    // ── COMPARE DIFF MODE ────────────────────────────────────────────
+    if (state.compareActive && state.compareImageId) {
+        const compareImg = state.getImage(state.compareImageId);
+
+        // Remove any stale diff banner
+        const existingBanner = jsonInspectorTree.parentElement?.querySelector('.compare-diff-banner');
+        if (existingBanner) existingBanner.remove();
+
+        if (!img || !img.structured_prompt) {
+            jsonInspectorPre.classList.remove('hidden');
+            jsonInspectorTree.classList.add('hidden');
+            jsonInspectorPre.textContent = '(featured image has no VGL data)';
+            return;
+        }
+        if (!compareImg || !compareImg.structured_prompt) {
+            jsonInspectorPre.classList.remove('hidden');
+            jsonInspectorTree.classList.add('hidden');
+            jsonInspectorPre.textContent = '(compare image has no VGL data)';
+            return;
+        }
+
+        let parsedA, parsedB;
+        try {
+            parsedA = typeof img.structured_prompt === 'string'
+                ? JSON.parse(img.structured_prompt) : img.structured_prompt;
+            parsedB = typeof compareImg.structured_prompt === 'string'
+                ? JSON.parse(compareImg.structured_prompt) : compareImg.structured_prompt;
+        } catch (e) {
+            jsonInspectorPre.classList.remove('hidden');
+            jsonInspectorTree.classList.add('hidden');
+            jsonInspectorPre.textContent = 'Error parsing VGL data: ' + e.message;
+            return;
+        }
+
+        const transformedA = transformStructuredPrompt(parsedA);
+        const transformedB = transformStructuredPrompt(parsedB);
+        const diffPaths = findDiffPaths(transformedA, transformedB);
+
+        // Insert banner above the tree container
+        const banner = document.createElement('div');
+        banner.className = 'compare-diff-banner';
+        if (diffPaths.length === 0) {
+            banner.innerHTML = '<span class="diff-badge diff-badge-same">✓ No differences</span>';
+        } else {
+            banner.innerHTML =
+                '<span class="diff-label">A</span> Featured &nbsp;vs&nbsp; ' +
+                '<span class="diff-label">B</span> Compare &nbsp;—&nbsp; ' +
+                `<span class="diff-count">${diffPaths.length} change${diffPaths.length !== 1 ? 's' : ''}</span>`;
+        }
+        jsonInspectorTree.parentElement.insertBefore(banner, jsonInspectorTree);
+
+        jsonInspectorPre.classList.add('hidden');
+        jsonInspectorTree.classList.remove('hidden');
+
+        if (diffPaths.length === 0) {
+            jsonInspectorTree.innerHTML = '';
+            return;
+        }
+
+        // Render only the subtrees that contain diffs, using transformedB (compare image) values
+        const diffOnlyTree = buildDiffOnlyTree(transformedB, diffPaths);
+        renderJsonTree(diffOnlyTree, jsonInspectorTree, diffPaths);
+        return;
+    }
+
+    // ── NORMAL MODE ──────────────────────────────────────────────────
+    // Remove any stale diff banner from a previous compare session
+    const stale = jsonInspectorTree.parentElement?.querySelector('.compare-diff-banner');
+    if (stale) stale.remove();
+
     if (!img || !img.structured_prompt) {
-        jsonInspectorPre.textContent = '(no structured prompt data)';
+        jsonInspectorPre.innerHTML = `
+            <div class="vgl-empty-state">
+                <div class="vgl-empty-icon">🗂️</div>
+                <div class="vgl-empty-text">Select an image to view structured data</div>
+            </div>
+        `;
+        jsonInspectorPre.classList.remove('hidden');
         jsonInspectorTree.innerHTML = '';
+        jsonInspectorTree.classList.add('hidden');
         return;
     }
 
@@ -1113,15 +1322,13 @@ function updateJsonInspector() {
         jsonInspectorTree.classList.remove('hidden');
 
         let highlightPaths = [];
-        // Only highlight if it's a refinement
+        // Highlight diffs when this image is a refinement of another
         if (img.mode === 'refine' && img.parentImageId) {
             const parent = state.getImage(img.parentImageId);
             if (parent && parent.structured_prompt) {
                 try {
                     const parentParsed = typeof parent.structured_prompt === 'string'
                         ? JSON.parse(parent.structured_prompt) : parent.structured_prompt;
-                    // Diff the TRANSFORMED versions so paths match what the tree actually renders
-                    // e.g. "Aesthetics.color_scheme" not "aesthetics.color_scheme"
                     const transformedParent = transformStructuredPrompt(parentParsed);
                     const transformedChild = transformStructuredPrompt(parsed);
                     highlightPaths = findDiffPaths(transformedParent, transformedChild);
@@ -1135,6 +1342,7 @@ function updateJsonInspector() {
 }
 
 state.on('featuredChanged', updateJsonInspector);
+state.on('compareChanged', updateJsonInspector);
 
 // ============================================================
 // VGL INSPECTOR FOOTER — Copy All + Copy Part
@@ -1312,3 +1520,17 @@ state.on('logsChanged', () => {
         logsList.scrollTop = 0;
     }
 });
+
+// ============================================================
+// APP STARTUP / INIT
+// ============================================================
+
+setTimeout(() => {
+    // 1. Initial UI update
+    updateActionButtonsState();
+
+    // 2. Prompt for API key if missing
+    if (!state.getApiKey() && elements.settingsDialog) {
+        elements.settingsDialog.showModal();
+    }
+}, 100);
