@@ -356,8 +356,7 @@ const api = {
 
         const body = {
             images: [raw],
-            seed: seed,
-            instruction: prompt
+            seed: seed
         };
 
         // Standard options
@@ -373,6 +372,8 @@ const api = {
                 si = JSON.stringify(si);
             }
             body.structured_instruction = si;
+        } else {
+            body.instruction = prompt;
         }
 
         const data = await briaRequest(endpoint, body);

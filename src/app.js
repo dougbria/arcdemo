@@ -740,6 +740,13 @@ async function handleAction(mode) {
                 console.warn('[TRACE] handleAction - Error parsing existing SP', e);
                 batchStructuredPrompt = rawSp;
             }
+        } else if (mode === 'edit') {
+            console.log('[TRACE] handleAction - mode is edit, calling generateStructuredPrompt (instruction)');
+            state.setLoading(true, 'Generating instruction layout…');
+            const spResult = await api.generateStructuredPrompt(prompt, editImage, null, options);
+            console.log('[TRACE] handleAction - generateStructuredPrompt (edit) returned', { sp: !!spResult.structured_prompt });
+            batchStructuredPrompt = spResult.structured_prompt;
+            if (!batchStructuredPrompt) throw new Error('Failed to generate structured instruction.');
         }
 
         // Default Refine/Edit seed to featured seed if available
@@ -769,7 +776,10 @@ async function handleAction(mode) {
                         });
                         break;
                     case 'edit':
-                        result = await api.edit(prompt, editImage, currentSeed, options);
+                        result = await api.edit(prompt, editImage, currentSeed, {
+                            ...options,
+                            structured_instruction: batchStructuredPrompt
+                        });
                         break;
                 }
                 const thumbnail = await createThumbnail(result.base64, 200);
@@ -849,14 +859,9 @@ async function handleStructuredPromptPreview(prompt, imageCount, options, mode =
                 parentImageId = refImg.id;
             }
 
-            // For natural language edit, we don't have a VGL "preview" per se, 
-            // but we'll show the JSON structure that will be sent.
-            spResult = {
-                structured_prompt: JSON.stringify({
-                    instruction: prompt,
-                    seed: baseSeed
-                }, null, 2)
-            };
+            console.log('[TRACE] handleStructuredPromptPreview - mode is edit, calling generateStructuredPrompt (instruction)');
+            state.setLoading(true, 'Generating instruction layout…');
+            spResult = await api.generateStructuredPrompt(prompt, editImage, null, options);
         }
         else {
             spResult = await api.generateStructuredPrompt(prompt, uploadedImageBase64, null, options);
